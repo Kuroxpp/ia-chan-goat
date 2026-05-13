@@ -1,0 +1,77 @@
+# ─────────────────────────────────────────────────────────────────────────────
+#  GameBot Discord — Stack Docker Compose
+#
+#  Architecture :
+#    • bot-gaming    : le bot Discord (image construite depuis ./bot)
+#    • ollama-main   : serveur Ollama local avec GPU Nvidia
+#    • Le backup Ollama est une machine EXTERNE, configurée via OLLAMA_BACKUP_URL
+#
+#  Prérequis GPU (ollama-main) :
+#    - NVIDIA Container Toolkit installé sur l'hôte
+#    - nvidia-smi disponible
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+
+  # ── Bot Discord ─────────────────────────────────────────────────────────────
+  bot-gaming:
+    build:
+      context: ./bot
+      dockerfile: Dockerfile
+    container_name: gamebot-discord
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      OLLAMA_PRIMARY_URL: "http://ollama-main:11434"
+      # OLLAMA_BACKUP_URL et DISCORD_TOKEN sont lus depuis .env
+    depends_on:
+      ollama-main:
+        condition: service_healthy
+    networks:
+      - gaming-net
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ── Ollama principal (GPU Nvidia) ────────────────────────────────────────────
+  ollama-main:
+    image: ollama/ollama:latest
+    container_name: ollama-main
+    restart: unless-stopped
+    volumes:
+      - ollama_data:/root/.ollama
+    networks:
+      - gaming-net
+    # ── Healthcheck : vérifie que l'API répond ──────────────────────────────
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    # ── Configuration GPU Nvidia ────────────────────────────────────────────
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "3"
+
+# ─── Volumes ──────────────────────────────────────────────────────────────────
+volumes:
+  ollama_data:
+    name: gamebot_ollama_data
+
+# ─── Réseau interne ───────────────────────────────────────────────────────────
+networks:
+  gaming-net:
+    name: gamebot_network
+    driver: bridge
